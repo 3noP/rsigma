@@ -4,6 +4,10 @@ All notable changes to RSigma are documented in this file. Each entry correspond
 
 ## [Unreleased]
 
+### NATS connections over TLS no longer panic
+
+`engine daemon` panicked on its first NATS connection whenever that connection was upgraded to TLS: with `--nats-require-tls`, a `tls://` URL, or a server that requires TLS. async-nats builds its rustls client config from the process-default `CryptoProvider`, and a build with `daemon-tls` or `daemon-otlp`, such as the release binaries and the Docker image, compiles both aws-lc-rs and ring, so rustls could not choose one. The NATS client now pins aws-lc-rs before it connects, as the webhook and OTLP clients already do, and as the API listener uses.
+
 ### Custom backend examples in the docs (#762)
 
 The library docs' custom backend example used a `TextQueryConfig::PYSIGMA_DEFAULTS` constant and a `Backend::text_query_config` method that do not exist, and said the trait's default `convert_rule` does the work, when `convert_rule` has no default. The section now lists the required methods, points `convert_rule` at `convert_rule_via_ir`, and says to start a config from an existing one. The developer guide's example imported the `text_convert_*` helpers from the crate root, where they are not exported; it now imports them from `rsigma_convert::backend`.
