@@ -21,6 +21,8 @@ use serde_json::{Value, json};
 #[cfg(feature = "dns-enrich")]
 pub mod dns;
 #[cfg(feature = "nats")]
+pub mod nats_auth;
+#[cfg(feature = "nats")]
 pub mod nats_tls;
 #[cfg(feature = "stix-source")]
 pub mod taxii;

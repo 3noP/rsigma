@@ -4,6 +4,12 @@ All notable changes to RSigma are documented in this file. Each entry correspond
 
 ## [Unreleased]
 
+### Dynamic NATS sources sign in with the daemon's `--nats-*` flags
+
+The dynamic-sources reference says a `type: nats` source takes its credentials from the daemon's `--nats-*` flags, but its clients connected with the URL alone: the initial read, the `refresh: push` subscription, and the `rsigma.control.resolve` control subject, which connects to the daemon's own NATS server. Against a server that requires a user and password, a token, a credentials file, an NKey or a client certificate, each was refused, the control subject with a warning in the log. `engine daemon` now passes its NATS connection settings to them, and to a `--disposition-source` of `type: nats`. `pipeline resolve` and `rule validate --resolve-sources` take no `--nats-*` flags and still connect with the URL alone.
+
+Breaking for `rsigma-runtime`: `sources::nats::resolve_nats_initial` and `sources::refresh::nats_control_loop` take a `&NatsConnectConfig` (its `url` the server's) instead of a URL; pass `&NatsConnectConfig::new(url)` for the previous behavior. `DefaultSourceResolver::with_nats` / `set_nats` and `RefreshScheduler::with_nats` give their sources the settings.
+
 ### NATS connections over TLS no longer panic (#773)
 
 `engine daemon` panicked on its first NATS connection whenever that connection was upgraded to TLS: with `--nats-require-tls`, a `tls://` URL, or a server that requires TLS. So did `pipeline resolve`, `rule validate --source` and the daemon on a dynamic NATS source. async-nats builds its rustls client config from the process-default `CryptoProvider`, and every build with `daemon-nats` compiles both aws-lc-rs and ring (the CLI links aws-lc-rs through jsonschema and ureq), so rustls could not choose one. The CLI now pins aws-lc-rs at startup, the provider the API listener uses, and `rsigma-runtime` pins it before each of its NATS connections when its `otlp` feature brings the second provider, as its webhook and OTLP clients already do.

@@ -49,6 +49,9 @@ pub struct RefreshScheduler {
     result_tx: watch::Sender<Option<RefreshResult>>,
     /// Watch channel receiver for consumers.
     result_rx: watch::Receiver<Option<RefreshResult>>,
+    /// The credentials and TLS a `refresh: push` NATS source subscribes with.
+    #[cfg(feature = "nats")]
+    nats: Option<crate::NatsConnectConfig>,
 }
 
 impl RefreshScheduler {
@@ -61,7 +64,18 @@ impl RefreshScheduler {
             trigger_rx: Some(trigger_rx),
             result_tx,
             result_rx,
+            #[cfg(feature = "nats")]
+            nats: None,
         }
+    }
+
+    /// Subscribe `refresh: push` NATS sources with `config`'s credentials and
+    /// TLS, each at its own URL (the daemon passes its `--nats-*` flags).
+    /// Without it, a source subscribes with its URL alone.
+    #[cfg(feature = "nats")]
+    pub fn with_nats(mut self, config: crate::NatsConnectConfig) -> Self {
+        self.nats = Some(config);
+        self
     }
 
     /// Get a sender for triggering on-demand resolution.
@@ -115,6 +129,8 @@ impl RefreshScheduler {
             .take()
             .expect("run() can only be called once");
 
+        #[cfg(feature = "nats")]
+        let nats = self.nats.take().unwrap_or_default();
         tokio::spawn(async move {
             Self::run_loop(
                 sources,
@@ -122,6 +138,8 @@ impl RefreshScheduler {
                 trigger_rx,
                 self.trigger_tx,
                 self.result_tx,
+                #[cfg(feature = "nats")]
+                nats,
             )
             .await;
         })
@@ -133,6 +151,7 @@ impl RefreshScheduler {
         mut trigger_rx: mpsc::Receiver<RefreshTrigger>,
         trigger_tx: mpsc::Sender<RefreshTrigger>,
         result_tx: watch::Sender<Option<RefreshResult>>,
+        #[cfg(feature = "nats")] nats: crate::NatsConnectConfig,
     ) {
         // Spawn interval timers
         for source in &sources {
@@ -176,13 +195,16 @@ impl RefreshScheduler {
             {
                 let tx = trigger_tx.clone();
                 let id = source.id.clone();
-                let url = url.clone();
+                let config = crate::NatsConnectConfig {
+                    url: url.clone(),
+                    ..nats.clone()
+                };
                 let subject = subject.clone();
                 let format = *format;
                 let extract_expr = extract_expr.clone();
                 tokio::spawn(async move {
                     if let Err(e) =
-                        nats_push_loop(&url, &subject, format, extract_expr.as_ref(), &id, &tx)
+                        nats_push_loop(&config, &subject, format, extract_expr.as_ref(), &id, &tx)
                             .await
                     {
                         tracing::error!(
@@ -285,7 +307,7 @@ pub struct SourceSubscription {
 /// Subscribe to a NATS subject and forward parsed messages as triggers.
 #[cfg(feature = "nats")]
 async fn nats_push_loop(
-    url: &str,
+    config: &crate::NatsConnectConfig,
     subject: &str,
     format: rsigma_eval::pipeline::sources::DataFormat,
     extract_expr: Option<&rsigma_eval::pipeline::sources::ExtractExpr>,
@@ -294,8 +316,8 @@ async fn nats_push_loop(
 ) -> Result<(), String> {
     use futures::StreamExt;
 
-    crate::io::nats_config::ensure_crypto_provider();
-    let client = async_nats::connect(url)
+    let client = config
+        .connect()
         .await
         .map_err(|e| format!("NATS connect failed: {e}"))?;
 
@@ -339,18 +361,19 @@ pub const NATS_CONTROL_SUBJECT: &str = "rsigma.control.resolve";
 
 /// Subscribe to the NATS control subject and forward re-resolution triggers.
 ///
-/// Messages with an empty payload trigger re-resolution of all sources.
+/// `config` carries the server's URL and the credentials and TLS to connect
+/// with (the daemon's `--nats-*` flags). Messages with an empty payload trigger re-resolution of all sources.
 /// Messages with a non-empty payload are treated as a source ID to re-resolve.
 #[cfg(feature = "nats")]
 pub async fn nats_control_loop(
-    url: &str,
+    config: &crate::NatsConnectConfig,
     subject: &str,
     trigger_tx: mpsc::Sender<RefreshTrigger>,
 ) -> Result<(), String> {
     use futures::StreamExt;
 
-    crate::io::nats_config::ensure_crypto_provider();
-    let client = async_nats::connect(url)
+    let client = config
+        .connect()
         .await
         .map_err(|e| format!("NATS control connect failed: {e}"))?;
 

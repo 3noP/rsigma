@@ -206,7 +206,7 @@ Subscribes to a NATS subject and updates the source value with each message. Req
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `url` | string | yes | `nats://host:port`. Auth comes from the daemon-level `--nats-*` flags. |
+| `url` | string | yes | `nats://host:port`. In `engine daemon`, the source connects with the daemon's `--nats-*` flags (credentials and TLS), its initial read and its `refresh: push` subscription alike; `pipeline resolve` and `rule validate --resolve-sources` connect with the URL alone. {{ added "unreleased" }} |
 | `subject` | string | yes | NATS subject (no wildcards for dynamic-source use). |
 | `format` | enum | yes | `json`, `yaml`, `lines`, or `csv`. |
 | `extract` | string or object | no | Filter applied after parsing. |

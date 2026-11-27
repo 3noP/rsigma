@@ -950,3 +950,207 @@ sources:
         "the failed source is reported: {stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Dynamic NATS sources sign in with the daemon's --nats-* flags
+// ---------------------------------------------------------------------------
+
+/// A NATS server that requires `rsigma` / `s3cret`: it lets in a client that
+/// signs in with them and refuses the others (`Authorization Violation`). Its
+/// port, how many clients it let in, and how many of those are still connected.
+fn auth_required_server() -> (
+    u16,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
+    use std::io::{Read, Write};
+    use std::sync::atomic::Ordering;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let signed_in = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let connected = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (count, open) = (signed_in.clone(), connected.clone());
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let (count, open) = (count.clone(), open.clone());
+            std::thread::spawn(move || {
+                let info = format!(
+                    "INFO {{\"server_id\":\"test\",\"version\":\"2.10.0\",\"host\":\"127.0.0.1\",\
+                     \"port\":{port},\"max_payload\":1048576,\"proto\":1,\"auth_required\":true}}\r\n"
+                );
+                if stream.write_all(info.as_bytes()).is_err() {
+                    return;
+                }
+                let mut seen = String::new();
+                let mut buf = [0u8; 4096];
+                let mut allowed: Option<bool> = None;
+                loop {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => {
+                            if allowed == Some(true) {
+                                open.fetch_sub(1, Ordering::SeqCst);
+                            }
+                            return;
+                        }
+                        Ok(n) => seen.push_str(&String::from_utf8_lossy(&buf[..n])),
+                    }
+                    if allowed.is_none()
+                        && let Some(line) = seen.lines().find(|l| l.starts_with("CONNECT "))
+                    {
+                        let connect: serde_json::Value =
+                            serde_json::from_str(&line["CONNECT ".len()..]).unwrap_or_default();
+                        let ok = connect["user"] == "rsigma" && connect["pass"] == "s3cret";
+                        if ok {
+                            count.fetch_add(1, Ordering::SeqCst);
+                            open.fetch_add(1, Ordering::SeqCst);
+                        }
+                        allowed = Some(ok);
+                    }
+                    if seen.contains("PING\r\n") {
+                        if allowed != Some(true) {
+                            let _ = stream.write_all(b"-ERR 'Authorization Violation'\r\n");
+                            return;
+                        }
+                        if stream.write_all(b"PONG\r\n").is_err() {
+                            open.fetch_sub(1, Ordering::SeqCst);
+                            return;
+                        }
+                        seen.clear();
+                    }
+                }
+            });
+        }
+    });
+    (port, signed_in, connected)
+}
+
+#[test]
+fn daemon_signs_its_dynamic_nats_sources_in_with_its_flags() {
+    use std::sync::atomic::Ordering;
+
+    let (port, signed_in, connected) = auth_required_server();
+    let rule = temp_file(".yml", SIMPLE_RULE);
+    let pipeline = temp_file(
+        ".yml",
+        r#"
+name: nats-auth
+priority: 10
+vars:
+  iocs:
+    - "${source.live_iocs}"
+transformations:
+  - type: value_placeholders
+"#,
+    );
+    let sources = temp_file(
+        ".yml",
+        &format!(
+            r#"
+sources:
+  - id: live_iocs
+    type: nats
+    url: nats://127.0.0.1:{port}
+    subject: rsigma.iocs.current
+    format: json
+    refresh: push
+    required: false
+"#
+        ),
+    );
+    // Its input stays open (stdin piped and held), so the daemon keeps running.
+    let mut child = Command::new(rsigma_bin())
+        .args([
+            "engine",
+            "daemon",
+            "-r",
+            rule.path().to_str().unwrap(),
+            "-p",
+            pipeline.path().to_str().unwrap(),
+            "--source",
+            sources.path().to_str().unwrap(),
+            "--api-addr",
+            "127.0.0.1:0",
+            "--nats-user",
+            "rsigma",
+            "--nats-password",
+            "s3cret",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn rsigma");
+    // The initial read (the resolver) signs in and leaves within a second; the
+    // push subscription (the scheduler) signs in and stays.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while signed_in.load(Ordering::SeqCst) < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    let total = signed_in.load(Ordering::SeqCst);
+    let still = connected.load(Ordering::SeqCst);
+    terminate_child(&mut child, Duration::from_secs(10));
+    assert!(total >= 2, "signed in {total} times");
+    assert!(
+        still >= 1,
+        "no signed-in client stayed: the push subscription is not signed in"
+    );
+}
+
+#[test]
+fn daemon_signs_its_nats_disposition_source_in_with_its_flags() {
+    use std::sync::atomic::Ordering;
+
+    let (port, signed_in, connected) = auth_required_server();
+    let rule = temp_file(".yml", SIMPLE_RULE);
+    let sources = temp_file(
+        ".yml",
+        &format!(
+            r#"
+sources:
+  - id: verdicts
+    type: nats
+    url: nats://127.0.0.1:{port}
+    subject: rsigma.dispositions
+    format: json
+    refresh: push
+    required: false
+"#
+        ),
+    );
+    let mut child = Command::new(rsigma_bin())
+        .args([
+            "engine",
+            "daemon",
+            "-r",
+            rule.path().to_str().unwrap(),
+            "--disposition-source",
+            sources.path().to_str().unwrap(),
+            "--api-addr",
+            "127.0.0.1:0",
+            "--nats-user",
+            "rsigma",
+            "--nats-password",
+            "s3cret",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to spawn rsigma");
+    // Its first read (the resolver) and its push subscription (the scheduler).
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while signed_in.load(Ordering::SeqCst) < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    let total = signed_in.load(Ordering::SeqCst);
+    let still = connected.load(Ordering::SeqCst);
+    terminate_child(&mut child, Duration::from_secs(10));
+    assert!(total >= 2, "signed in {total} times");
+    assert!(
+        still >= 1,
+        "no signed-in client stayed: the push subscription is not signed in"
+    );
+}

@@ -61,16 +61,15 @@ impl NatsConnectConfig {
 /// Pin the process-default rustls `CryptoProvider` before async-nats builds its
 /// TLS client config, which it does from the process default whenever the
 /// connection is upgraded: `require_tls`, a `tls://` URL, or a server whose
-/// INFO requires TLS. Called before every NATS connection in this crate:
-/// [`NatsConnectConfig::connect`] and the dynamic sources' own clients
-/// (`sources::nats`, `sources::refresh`).
+/// INFO requires TLS. Every NATS client in this crate, the dynamic sources'
+/// included, connects through [`NatsConnectConfig::connect`], which calls it.
 ///
 /// With the `otlp` feature, tonic pulls aws-lc-rs and async-nats pulls ring, so
 /// rustls cannot auto-select a default and the upgrade would panic; pin
 /// aws-lc-rs to match the daemon's other TLS surfaces. Without `otlp` this
 /// crate brings a single provider, so this is a no-op, and a binary that links
 /// another installs its own default (the CLI does at startup).
-pub(crate) fn ensure_crypto_provider() {
+fn ensure_crypto_provider() {
     #[cfg(feature = "otlp")]
     {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();

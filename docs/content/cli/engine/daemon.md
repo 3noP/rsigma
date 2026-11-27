@@ -298,6 +298,8 @@ On that machine and these lanes:
 
 The auth methods are mutually exclusive. See [NATS Streaming](../../guide/nats-streaming.md) for the full operational guide.
 
+The same flags sign in the daemon's other NATS clients: `type: nats` dynamic sources, the `rsigma.control.resolve` control subject, and a `--disposition-source` of `type: nats`. {{ added "unreleased" }}
+
 ### Performance (advanced)
 
 | Flag | Default | Description |

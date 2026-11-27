@@ -30,6 +30,9 @@ pub struct DispositionState {
     metrics: Arc<Metrics>,
     alert_state: Arc<RwLock<AlertPipelineState>>,
     capture: Option<CaptureSpool>,
+    /// The credentials and TLS a NATS pull source connects with.
+    #[cfg(feature = "daemon-nats")]
+    nats: Option<rsigma_runtime::NatsConnectConfig>,
 }
 
 /// The result of ingesting a batch of dispositions, returned by the endpoint
@@ -70,7 +73,16 @@ impl DispositionState {
             metrics,
             alert_state,
             capture,
+            #[cfg(feature = "daemon-nats")]
+            nats: None,
         }
+    }
+
+    /// Connect NATS pull sources with the daemon's `--nats-*` settings.
+    #[cfg(feature = "daemon-nats")]
+    pub fn with_nats(mut self, config: rsigma_runtime::NatsConnectConfig) -> Self {
+        self.nats = Some(config);
+        self
     }
 
     /// Capture the store into a versioned snapshot for persistence, or `None`
@@ -298,8 +310,16 @@ impl DispositionState {
             })
             .collect();
 
-        let scheduler = RefreshScheduler::new();
         let mut resolver = DefaultSourceResolver::new();
+        let scheduler = RefreshScheduler::new();
+        #[cfg(feature = "daemon-nats")]
+        let scheduler = match &self.nats {
+            Some(config) => {
+                resolver.set_nats(config.clone());
+                scheduler.with_nats(config.clone())
+            }
+            None => scheduler,
+        };
         if let Err(err) = resolver.prepare_taxii(&sources) {
             tracing::error!(error = %err, "Failed to prepare TAXII sources");
             return;

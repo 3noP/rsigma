@@ -30,6 +30,12 @@ impl InstrumentedResolver {
         self.inner.set_watchlists(registry);
     }
 
+    /// Connect `type: nats` sources with the daemon's `--nats-*` settings.
+    #[cfg(feature = "daemon-nats")]
+    pub fn set_nats(&mut self, config: rsigma_runtime::NatsConnectConfig) {
+        self.inner.set_nats(config);
+    }
+
     /// Read TAXII credentials for `sources` before the first poll.
     pub fn prepare_taxii(
         &mut self,

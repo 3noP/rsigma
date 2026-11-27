@@ -747,6 +747,9 @@ pub async fn run_daemon(config: DaemonConfig) -> i32 {
         let mut instrumented =
             super::instrumented_resolver::InstrumentedResolver::new(metrics.clone());
         instrumented.set_watchlists(watchlist_registry.clone());
+        // A `type: nats` source signs in with the daemon's --nats-* flags.
+        #[cfg(feature = "daemon-nats")]
+        instrumented.set_nats(config.nats_config.clone());
         if let Err(err) = instrumented.prepare_taxii(&declared_sources) {
             tracing::error!(error = %err, "Failed to prepare TAXII sources");
             eprintln!("Error preparing TAXII sources: {err}");
@@ -813,6 +816,8 @@ pub async fn run_daemon(config: DaemonConfig) -> i32 {
 
         if !all_sources.is_empty() {
             let scheduler = rsigma_runtime::sources::refresh::RefreshScheduler::new();
+            #[cfg(feature = "daemon-nats")]
+            let scheduler = scheduler.with_nats(config.nats_config.clone());
             source_results = Some(scheduler.result_receiver());
             sources_trigger_tx_val = Some(scheduler.trigger_sender());
             if !watchlist_ids.is_empty() {
@@ -827,12 +832,14 @@ pub async fn run_daemon(config: DaemonConfig) -> i32 {
             // Spawn NATS control subject listener for remote re-resolution triggers
             #[cfg(feature = "daemon-nats")]
             {
-                let nats_url = config.nats_config.url.clone();
+                let nats_config = config.nats_config.clone();
                 let trigger_tx = scheduler.trigger_sender();
                 tokio::spawn(async move {
                     let subject = rsigma_runtime::sources::refresh::NATS_CONTROL_SUBJECT;
                     if let Err(e) = rsigma_runtime::sources::refresh::nats_control_loop(
-                        &nats_url, subject, trigger_tx,
+                        &nats_config,
+                        subject,
+                        trigger_tx,
                     )
                     .await
                     {
@@ -1386,6 +1393,9 @@ pub async fn run_daemon(config: DaemonConfig) -> i32 {
             alert_state.clone(),
             capture_spool,
         );
+        // A NATS pull source signs in with the daemon's --nats-* flags.
+        #[cfg(feature = "daemon-nats")]
+        let state = state.with_nats(config.nats_config.clone());
         // Roll the window forward for idle rules on a timer.
         state.spawn_pruner();
         // Restore persisted disposition state (unless --clear-state), pruning

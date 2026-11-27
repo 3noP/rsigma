@@ -130,6 +130,9 @@ pub struct DefaultSourceResolver {
     stix_now: Option<rstix::core::StixTimestamp>,
     #[cfg(feature = "stix-source")]
     taxii: std::sync::Mutex<taxii::TaxiiSources>,
+    /// The credentials and TLS a `type: nats` source connects with.
+    #[cfg(feature = "nats")]
+    nats: Option<crate::NatsConnectConfig>,
 }
 
 impl DefaultSourceResolver {
@@ -143,6 +146,8 @@ impl DefaultSourceResolver {
             stix_now: None,
             #[cfg(feature = "stix-source")]
             taxii: std::sync::Mutex::new(taxii::TaxiiSources::default()),
+            #[cfg(feature = "nats")]
+            nats: None,
         }
     }
 
@@ -156,6 +161,8 @@ impl DefaultSourceResolver {
             stix_now: None,
             #[cfg(feature = "stix-source")]
             taxii: std::sync::Mutex::new(taxii::TaxiiSources::default()),
+            #[cfg(feature = "nats")]
+            nats: None,
         }
     }
 
@@ -171,6 +178,8 @@ impl DefaultSourceResolver {
             stix_now: None,
             #[cfg(feature = "stix-source")]
             taxii: std::sync::Mutex::new(taxii::TaxiiSources::default()),
+            #[cfg(feature = "nats")]
+            nats: None,
         }
     }
 
@@ -246,6 +255,22 @@ impl DefaultSourceResolver {
     /// Attach a watchlist registry after the resolver already exists.
     pub fn set_watchlists(&mut self, registry: std::sync::Arc<WatchlistRegistry>) {
         self.watchlists = Some(registry);
+    }
+
+    /// Connect `type: nats` sources with `config`'s credentials and TLS, each
+    /// at its own URL (the daemon passes its `--nats-*` flags). Without it, a
+    /// source connects with its URL alone.
+    #[cfg(feature = "nats")]
+    pub fn with_nats(mut self, config: crate::NatsConnectConfig) -> Self {
+        self.set_nats(config);
+        self
+    }
+
+    /// Set the connection settings of `type: nats` sources after the resolver
+    /// already exists (see [`with_nats`](Self::with_nats)).
+    #[cfg(feature = "nats")]
+    pub fn set_nats(&mut self, config: crate::NatsConnectConfig) {
+        self.nats = Some(config);
     }
 
     /// Get a reference to the cache (for inspection/testing).
@@ -456,7 +481,13 @@ impl SourceResolver for DefaultSourceResolver {
                 subject,
                 format,
                 extract,
-            } => nats::resolve_nats_initial(url, subject, *format, extract.as_ref()).await,
+            } => {
+                let config = crate::NatsConnectConfig {
+                    url: url.clone(),
+                    ..self.nats.clone().unwrap_or_default()
+                };
+                nats::resolve_nats_initial(&config, subject, *format, extract.as_ref()).await
+            }
             #[cfg(not(feature = "nats"))]
             SourceType::Nats { .. } => {
                 return Err(SourceError {
