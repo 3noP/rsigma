@@ -161,7 +161,6 @@ async fn without_the_ca_the_server_is_refused() {
 
 #[tokio::test]
 async fn a_named_ca_refuses_a_server_without_tls() {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let (ca_pem, _, _) = mint();
     let mut ca = tempfile::NamedTempFile::new().unwrap();
     ca.write_all(ca_pem.as_bytes()).unwrap();
@@ -177,11 +176,12 @@ async fn a_named_ca_refuses_a_server_without_tls() {
         tls_ca: Some(ca.path().to_path_buf()),
         ..Default::default()
     };
-    let result = tokio::time::timeout(Duration::from_secs(20), config.connect())
+    let err = tokio::time::timeout(Duration::from_secs(10), config.connect())
         .await
-        .expect("connect did not return");
+        .expect("connect did not return")
+        .expect_err("a client that names a CA must refuse a server without TLS");
     assert!(
-        result.is_err(),
-        "a client that names a CA must refuse a server without TLS"
+        format!("{err:?}").contains("add_root_certificates() asks for TLS"),
+        "{err:?}"
     );
 }
