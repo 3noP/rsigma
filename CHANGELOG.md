@@ -8,6 +8,12 @@ All notable changes to RSigma are documented in this file. Each entry correspond
 
 `engine daemon` panicked on its first NATS connection whenever that connection was upgraded to TLS: with `--nats-require-tls`, a `tls://` URL, or a server that requires TLS. So did `pipeline resolve`, `rule validate --source` and the daemon on a dynamic NATS source. async-nats builds its rustls client config from the process-default `CryptoProvider`, and every build with `daemon-nats` compiles both aws-lc-rs and ring (the CLI links aws-lc-rs through jsonschema and ureq), so rustls could not choose one. The CLI now pins aws-lc-rs at startup, the provider the API listener uses, and `rsigma-runtime` pins it before each of its NATS connections when its `otlp` feature brings the second provider, as its webhook and OTLP clients already do.
 
+### Pipelines can apply modifiers before their transformations (#771)
+
+pySigma applies value modifiers when it parses a rule, so its value transformations see `*foo*` for `F|contains: foo` and the encoded text for `F|base64: foo`. rsigma applies them when it compiles or converts the rule, so the same pipeline saw the raw value and could produce a rule that matches different events. For example, `set_value` on a `contains` item kept the `contains`, where pySigma makes it an exact match. A pipeline can now set `apply_modifiers: first` to rewrite the values the way pySigma does before its transformations run: `contains`, `startswith`, and `endswith` become `*` wildcards, and `base64`, `base64offset`, `wide`, `utf16`, `utf16be`, and `windash` encode the value. The default, `apply_modifiers: last`, keeps the current behavior. The processing pipelines guide describes both and the cases the rewrite leaves alone.
+
+Breaking for library users: `Pipeline` has a new `apply_modifiers` field of type `pipeline::ApplyModifiers`, so a `Pipeline` literal must set it.
+
 ### Custom backend examples in the docs (#762)
 
 The library docs' custom backend example used a `TextQueryConfig::PYSIGMA_DEFAULTS` constant and a `Backend::text_query_config` method that do not exist, and said the trait's default `convert_rule` does the work, when `convert_rule` has no default. The section now lists the required methods, points `convert_rule` at `convert_rule_via_ir`, and says to start a config from an existing one. The developer guide's example imported the `text_convert_*` helpers from the crate root, where they are not exported; it now imports them from `rsigma_convert::backend`.
