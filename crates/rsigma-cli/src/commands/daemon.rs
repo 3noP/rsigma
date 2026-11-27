@@ -292,6 +292,12 @@ pub(crate) struct DaemonArgs {
     #[arg(long = "nats-tls-key", requires = "nats_tls_cert")]
     pub nats_tls_key: Option<PathBuf>,
 
+    /// CA certificate (PEM) the NATS server's certificate must chain to,
+    /// trusted instead of the system's roots.
+    #[cfg(feature = "daemon-nats")]
+    #[arg(long = "nats-tls-ca")]
+    pub nats_tls_ca: Option<PathBuf>,
+
     /// Require TLS for NATS connections.
     #[cfg(feature = "daemon-nats")]
     #[arg(long = "nats-require-tls")]
@@ -730,6 +736,7 @@ pub(crate) struct NatsAuthArgs {
     pub nats_nkey: Option<String>,
     pub nats_tls_cert: Option<PathBuf>,
     pub nats_tls_key: Option<PathBuf>,
+    pub nats_tls_ca: Option<PathBuf>,
     pub nats_require_tls: bool,
 }
 
@@ -863,6 +870,8 @@ pub(crate) fn cmd_daemon(
         #[cfg(feature = "daemon-nats")]
         nats_tls_key,
         #[cfg(feature = "daemon-nats")]
+        nats_tls_ca,
+        #[cfg(feature = "daemon-nats")]
         nats_require_tls,
         #[cfg(feature = "daemon-nats")]
         replay_from_sequence,
@@ -951,6 +960,7 @@ pub(crate) fn cmd_daemon(
         nats_nkey,
         nats_tls_cert,
         nats_tls_key,
+        nats_tls_ca,
         nats_require_tls,
     };
 
@@ -2239,6 +2249,7 @@ fn run_daemon(
         nkey: nats_auth.nats_nkey,
         tls_client_cert: nats_auth.nats_tls_cert,
         tls_client_key: nats_auth.nats_tls_key,
+        tls_ca: nats_auth.nats_tls_ca,
         require_tls: nats_auth.nats_require_tls,
         ..Default::default()
     };

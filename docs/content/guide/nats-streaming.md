@@ -80,6 +80,14 @@ rsigma engine daemon -r rules/ \
 
 A client certificate also requires TLS, so `--nats-tls-cert` alone refuses a server that does not negotiate TLS. TLS then applies to every server the client connects to, including servers the cluster announces and reconnects, and servers the cluster announces are verified against a host name the client trusts. {{ added "unreleased" }}
 
+When a private CA issued the server's certificate, name that CA with `--nats-tls-ca`. It is trusted instead of the system's roots, so the process's trust store (`SSL_CERT_FILE`) stays as it is. Like a client certificate, it requires TLS: a server that does not negotiate TLS is refused. {{ added "unreleased" }}
+
+```bash
+rsigma engine daemon -r rules/ \
+    --input nats://nats.internal:4222/events.> \
+    --nats-tls-ca /etc/rsigma/nats-ca.pem
+```
+
 ## At-least-once delivery
 
 When `--input nats://...` is used, the daemon switches from at-most-once to at-least-once semantics. Each message is wrapped in an `AckToken` that is held until every output sink has committed the corresponding result: delivered it, or handed the failure to the DLQ writer. A dedicated ack task resolves tokens after that confirmation.

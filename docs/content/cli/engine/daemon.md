@@ -290,6 +290,7 @@ On that machine and these lanes:
 | `--nats-nkey <SEED>` | `NATS_NKEY` | NATS NKey seed. |
 | `--nats-tls-cert <FILE>` | unset | TLS client certificate for mutual TLS with NATS. Setting it requires TLS, as `--nats-require-tls` does. {{ added "unreleased" }} |
 | `--nats-tls-key <FILE>` | unset | TLS client private key for mutual TLS with NATS. |
+| `--nats-tls-ca <FILE>` | unset | CA certificate (PEM) the NATS server's certificate must chain to, trusted instead of the system's roots. Like a client certificate, it requires TLS. {{ added "unreleased" }} |
 | `--nats-require-tls` | off | Refuse to connect to a NATS server that does not negotiate TLS. |
 | `--replay-from-sequence <SEQ>` | unset | Replay from a specific JetStream sequence number. |
 | `--replay-from-time <TIMESTAMP>` | unset | Replay from a wall-clock time (ISO 8601: `2026-05-15T10:00:00Z`). |

@@ -14,6 +14,9 @@ pub struct NatsConnectConfig {
     pub nkey: Option<String>,
     pub tls_client_cert: Option<PathBuf>,
     pub tls_client_key: Option<PathBuf>,
+    /// CA certificate (PEM) the server's certificate must chain to, trusted
+    /// instead of the system's roots.
+    pub tls_ca: Option<PathBuf>,
     pub require_tls: bool,
 }
 
@@ -46,6 +49,10 @@ impl NatsConnectConfig {
 
         if let (Some(cert), Some(key)) = (&self.tls_client_cert, &self.tls_client_key) {
             options = options.add_client_certificate(cert.clone(), key.clone());
+        }
+
+        if let Some(ref ca) = self.tls_ca {
+            options = options.add_root_certificates(ca.clone());
         }
 
         if self.require_tls {
